@@ -25,13 +25,27 @@ from common.ssh_mysql_connector import MySQLSSHConnector
 _env_path = os.path.join(sys._MEIPASS if getattr(sys, 'frozen', False) else _ROOT, '.env')
 load_dotenv(_env_path)
 
+# ログ設定（ohp-sync/logs/ に出力）
+_LOG_DIR = os.path.join(os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
+os.makedirs(_LOG_DIR, exist_ok=True)
+_log_file = os.path.join(_LOG_DIR, 'oh_u_p_import.log')
+
 logging.basicConfig(
-    filename="oh_u_p_import.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    encoding="utf-8",
-    filemode="w",
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file, encoding='utf-8', mode='a'),
+        logging.StreamHandler(sys.stdout),
+    ]
 )
+
+def _handle_exception(exc_type, exc_value, exc_tb):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    logging.error("未キャッチ例外", exc_info=(exc_type, exc_value, exc_tb))
+
+sys.excepthook = _handle_exception
 
 def log_and_print(message):
     print(message)
@@ -289,21 +303,21 @@ def upsert_all_data(connection, users, pets, branches, import_at):
         try:
             upsert_user_data(cursor, user, import_at)
         except Exception as e:
-            log_and_print(f"ユーザーUPSERTエラー: {e}")
+            logging.error(f"ユーザーUPSERTエラー: {e}", exc_info=True)
     connection.commit()
     log_and_print(f"ペットデータ: {len(pets)} 件")
     for pet in pets:
         try:
             upsert_pet_data(cursor, [pet], import_at)
         except Exception as e:
-            log_and_print(f"ペットUPSERTエラー: {e}")
+            logging.error(f"ペットUPSERTエラー: {e}", exc_info=True)
     connection.commit()
     log_and_print(f"支店データ: {len(branches)} 件")
     for branch in branches.values():
         try:
             upsert_branch_data(cursor, branch, import_at)
         except Exception as e:
-            log_and_print(f"支店UPSERTエラー: {e}")
+            logging.error(f"支店UPSERTエラー: {e}", exc_info=True)
     connection.commit()
     cursor.close()
 
@@ -321,37 +335,42 @@ def main():
         return
 
     start_time = datetime.now()
-    log_and_print(f"支店 {branch} の処理を開始します。")
+    logging.info("=" * 60)
+    logging.info(f"処理開始 branch={branch}")
 
-    db_connector = MySQLSSHConnector()
-    connection = db_connector.connection
-
-    chrome_options = Options()
-    chrome_options.add_argument("--window-size=1920x1080")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-features=UseChromeOSDirectML")
-    chrome_options.add_argument("--log-level=3")  # ERROR のみ
-    chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])  # DevTools表示抑止
-
-
-    # ✅ 一時ユーザーデータディレクトリを指定してセッション競合を回避
-    temp_profile = tempfile.mkdtemp()
-    chrome_options.add_argument(f"--user-data-dir={temp_profile}")
-
-    driver = None
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-        import_at = login(driver, branch)
-        users, pets, branches = fetch_pets_data(driver, shop_id)
-        upsert_all_data(connection, users, pets, branches, import_at)
+        db_connector = MySQLSSHConnector()
+        connection = db_connector.connection
+
+        chrome_options = Options()
+        chrome_options.add_argument("--window-size=1920x1080")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-features=UseChromeOSDirectML")
+        chrome_options.add_argument("--log-level=3")
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+        temp_profile = tempfile.mkdtemp()
+        chrome_options.add_argument(f"--user-data-dir={temp_profile}")
+
+        driver = None
+        try:
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+            import_at = login(driver, branch)
+            users, pets, branches = fetch_pets_data(driver, shop_id)
+            upsert_all_data(connection, users, pets, branches, import_at)
+        finally:
+            db_connector.close()
+            if driver:
+                driver.quit()
+    except Exception as e:
+        logging.error(f"致命的エラー: {e}", exc_info=True)
+        raise
     finally:
-        db_connector.close()
-        if driver:
-            driver.quit()
         elapsed = (datetime.now() - start_time).total_seconds()
-        log_and_print(f"支店 {branch} の処理が完了しました。経過時間: {elapsed} 秒")
+        logging.info(f"処理終了 経過時間: {elapsed:.1f}秒")
+        logging.info("=" * 60)
 
 if __name__ == "__main__":
     main()

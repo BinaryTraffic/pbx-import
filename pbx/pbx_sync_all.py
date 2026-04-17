@@ -45,14 +45,27 @@ os.makedirs(ARCHIVE_DIR, exist_ok=True)
 PBX_LOGIN_USER = os.getenv("PBX_LOGIN_USER")
 PBX_PASSWORD = os.getenv("PBX_PASSWORD")
 
-# ✅ ログ設定
+# ログ設定（ohp-sync/logs/ に出力）
+_LOG_DIR = os.path.join(os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
+os.makedirs(_LOG_DIR, exist_ok=True)
+_log_file = os.path.join(_LOG_DIR, 'pbx_sync_all.log')
+
 logging.basicConfig(
-    filename="pbx_sync_all.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    encoding="utf-8",
-    filemode="a",
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file, encoding='utf-8', mode='a'),
+        logging.StreamHandler(sys.stdout),
+    ]
 )
+
+def _handle_exception(exc_type, exc_value, exc_tb):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    logging.error("未キャッチ例外", exc_info=(exc_type, exc_value, exc_tb))
+
+sys.excepthook = _handle_exception
 
 def log_and_print(message):
     print(message)
@@ -272,21 +285,31 @@ def upsert_addressbook(csv_path):
         db_connector.close()
 
 def main():
-    log_and_print("=== PBX同期処理 開始 ===")
+    logging.info("=" * 60)
+    logging.info("=== PBX同期処理 開始 ===")
+    start_time = datetime.now()
 
-    upload_csv = export_new_pbx_memberlist()
-    if not upload_csv:
-        return
+    try:
+        upload_csv = export_new_pbx_memberlist()
+        if not upload_csv:
+            logging.info("新規レコードなし。処理を終了します。")
+            return
 
-    upload_to_pbx_site(upload_csv)
+        upload_to_pbx_site(upload_csv)
+        scrape_and_download()
 
-    scrape_and_download()
+        download_csv = rename_latest_download()
+        if download_csv:
+            upsert_addressbook(download_csv)
 
-    download_csv = rename_latest_download()
-    if download_csv:
-        upsert_addressbook(download_csv)
-
-    log_and_print("=== PBX同期処理 完了 ===")
+        logging.info("=== PBX同期処理 完了 ===")
+    except Exception as e:
+        logging.error(f"致命的エラー: {e}", exc_info=True)
+        raise
+    finally:
+        elapsed = datetime.now() - start_time
+        logging.info(f"経過時間: {elapsed}")
+        logging.info("=" * 60)
 
 if __name__ == "__main__":
     main()

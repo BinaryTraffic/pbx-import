@@ -36,14 +36,27 @@ BRANCH_MAP = {
     2: 513605   # 目黒店
 }
 
-# ログ設定
+# ログ設定（ohp-sync/logs/ に出力）
+_LOG_DIR = os.path.join(os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
+os.makedirs(_LOG_DIR, exist_ok=True)
+_log_file = os.path.join(_LOG_DIR, 'oh_cal_import_db_sc.log')
+
 logging.basicConfig(
-    filename="oh_cal_import_db_sc.txt",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    filemode="w",
-    encoding="utf-8"
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file, encoding='utf-8', mode='a'),
+        logging.StreamHandler(sys.stdout),
+    ]
 )
+
+def _handle_exception(exc_type, exc_value, exc_tb):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    logging.error("未キャッチ例外", exc_info=(exc_type, exc_value, exc_tb))
+
+sys.excepthook = _handle_exception
 
 
 # 引数の解析
@@ -450,36 +463,43 @@ def scrape_calendar(driver, connection, update_dt, shop_id):
 
 def main():
     """メイン処理"""
-    log_and_print("処理を開始します。")
+    logging.info("=" * 60)
+    logging.info(f"処理開始 branch={branch_index} month={loop_count}")
     start_time = datetime.now()
 
-    db_connector = MySQLSSHConnector()
-    connection = db_connector.connection
-
     try:
-        options = {"disable_encoding": True}
-        chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--log-level=3")  # ERROR のみ
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])  # DevTools表示抑止
-
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            seleniumwire_options=options,
-            options=chrome_options
-        )
+        db_connector = MySQLSSHConnector()
+        connection = db_connector.connection
 
         try:
-            update_dt = login(driver)
-            scrape_calendar(driver, connection, update_dt, shop_id)
+            options = {"disable_encoding": True}
+            chrome_options = webdriver.ChromeOptions()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--log-level=3")
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+            driver = webdriver.Chrome(
+                service=Service(ChromeDriverManager().install()),
+                seleniumwire_options=options,
+                options=chrome_options
+            )
+
+            try:
+                update_dt = login(driver)
+                scrape_calendar(driver, connection, update_dt, shop_id)
+            finally:
+                driver.quit()
         finally:
-            driver.quit()
+            db_connector.close()
+    except Exception as e:
+        logging.error(f"致命的エラー: {e}", exc_info=True)
+        raise
     finally:
-        db_connector.close()
-        end_time = datetime.now()
-        log_and_print(f"処理を終了しました。経過時間: {end_time - start_time}")
+        elapsed = datetime.now() - start_time
+        logging.info(f"処理終了 経過時間: {elapsed}")
+        logging.info("=" * 60)
 
 if __name__ == "__main__":
     main()
