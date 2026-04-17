@@ -12,6 +12,14 @@ _BASE = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os
 log_dir = os.path.join(_BASE, '..', 'logs')
 os.makedirs(log_dir, exist_ok=True)
 
+# 自身がbeta版かどうかを実行ファイル名で判定
+_exe_name = os.path.basename(sys.executable) if getattr(sys, 'frozen', False) else ''
+_is_beta = '_beta' in _exe_name
+
+def _to_exe(name):
+    """beta実行時は子EXEも自動でbeta版に切り替える"""
+    return name.replace('.exe', '_beta.exe') if _is_beta else name
+
 def run_silently_to_log(script_name, args_per_branch):
     for branch in tqdm(branch_indices, desc=f"{script_name} 実行中", unit="支店"):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -31,10 +39,10 @@ def run_silently_to_log(script_name, args_per_branch):
         time.sleep(1)
 
 # === ステップ①: oh_cal_import_db_sc.exe を支店ごとに順次実行 ===
-run_silently_to_log("oh_cal_import_db_sc.exe", ["month=0"])
+run_silently_to_log(_to_exe("oh_cal_import_db_sc.exe"), ["month=0"])
 
-# === ステップ②: oh_u_p_import copy.exe を支店ごとに順次実行 ===
-run_silently_to_log("oh_u_p_import.exe", [])
+# === ステップ②: oh_u_p_import.exe を支店ごとに順次実行 ===
+run_silently_to_log(_to_exe("oh_u_p_import.exe"), [])
 
 # === ステップ③: 完了メッセージ ===
 print("✅ すべての支店・スクリプトの処理が完了しました。")
