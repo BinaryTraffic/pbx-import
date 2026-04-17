@@ -1,0 +1,10 @@
+sshtunnel
+pymysql
+python-dotenv
+selenium
+selenium-wire
+webdriver-manager
+pandas
+python-dateutil
+tqdm
+pyinstaller

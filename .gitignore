@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+dist/
+build/
+logs/
+work/
+*.log
+*.txt
+!requirements.txt
