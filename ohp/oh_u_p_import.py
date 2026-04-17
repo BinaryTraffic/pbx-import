@@ -3,6 +3,7 @@ import os
 import logging
 import time
 import sys
+import requests as req_lib
 from datetime import datetime
 from seleniumwire import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -51,7 +52,12 @@ def switch_account(driver, option_index):
     select = Select(select_element)
     select.select_by_index(option_index)
     log_and_print(f"アカウントが切り替えられました: オプション {option_index}")
-    time.sleep(5)
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.invisibility_of_element_located((By.ID, "loadingOverlay"))
+        )
+    except Exception:
+        time.sleep(2)
 
 def login(driver, branch):
     log_and_print("ログイン処理を開始します。")
@@ -77,7 +83,7 @@ def login(driver, branch):
         inputs[0].send_keys(email)
         inputs[1].send_keys(password)
         driver.find_element(By.CLASS_NAME, "c-btn-add-a").click()
-        time.sleep(5)
+        WebDriverWait(driver, 15).until(EC.url_contains('/shop/'))
         switch_account(driver, branch_to_select_index[branch_str])
         update_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_and_print("ログイン処理が完了しました。")
@@ -86,17 +92,76 @@ def login(driver, branch):
         log_and_print(f"ログイン中にエラーが発生しました: {e}")
         return None
 
+def extract_auth_token(driver, url_keyword, timeout=20):
+    """傍受済みXHRからAuthorizationトークンを抽出"""
+    start = time.time()
+    while time.time() - start < timeout:
+        for request in driver.requests:
+            if url_keyword in request.url and request.headers.get('Authorization'):
+                return request.headers.get('Authorization')
+        time.sleep(0.5)
+    return None
+
 def fetch_pets_data(driver, shop_id):
     log_and_print("ペットデータ取得を開始します。")
     driver.get("https://admin.onehomeplus.jp/shop/customer")
-    time.sleep(5)
 
-    pets_api_prefix = f"https://api.onehomeplus.jp/api/v1/salon/shops/{shop_id}/pets?order_type=registered_date&order_ad=desc&limit="
+    pets_api_base = f"https://api.onehomeplus.jp/api/v1/salon/shops/{shop_id}/pets"
+
+    # 認証トークンを取得（初回XHRを待機）
+    auth_token = extract_auth_token(driver, pets_api_base)
+
+    if auth_token:
+        log_and_print("認証トークン取得成功。ページネーションAPIで取得します。")
+        return fetch_pets_data_api(shop_id, auth_token, pets_api_base)
+    else:
+        log_and_print("認証トークン取得失敗。スクロール方式にフォールバックします。")
+        return fetch_pets_data_scroll(driver, shop_id, pets_api_base)
+
+def fetch_pets_data_api(shop_id, auth_token, pets_api_base):
+    """requests ライブラリでページネーション取得（スクロール不要）"""
     all_pets = {}
     all_users = {}
     all_branch = {}
-    start_time = datetime.now()
-    new_pets_count = len(all_pets)
+    limit = 100
+    offset = 0
+    headers = {'Authorization': auth_token}
+
+    while True:
+        params = {'order_type': 'registered_date', 'order_ad': 'desc', 'limit': limit, 'offset': offset}
+        try:
+            response = req_lib.get(pets_api_base, headers=headers, params=params, timeout=15)
+            data = response.json().get('data', [])
+        except Exception as e:
+            log_and_print(f"APIリクエストエラー: {e}")
+            break
+
+        if not data:
+            log_and_print("ページネーション完了")
+            break
+
+        for pet in data:
+            pet_id = pet.get("id")
+            if pet_id and pet_id not in all_pets:
+                all_pets[pet_id] = pet
+            user_data = pet.get("user")
+            if user_data:
+                all_users[user_data["id"]] = user_data
+                user_shop = user_data.get("user_shop")
+                if user_shop:
+                    all_branch[user_shop["id"]] = user_shop
+
+        offset += limit
+        log_and_print(f"累積pets件数: {len(all_pets)} 件, 累積users件数: {len(all_users)} 件")
+
+    return all_users, list(all_pets.values()), all_branch
+
+def fetch_pets_data_scroll(driver, shop_id, pets_api_base):
+    """フォールバック：スクロール方式（認証トークン取得失敗時）"""
+    all_pets = {}
+    all_users = {}
+    all_branch = {}
+    new_pets_count = 0
 
     while True:
         pet_data_response = None
@@ -104,10 +169,9 @@ def fetch_pets_data(driver, shop_id):
         time.sleep(5)
 
         for request in driver.requests:
-            if request.response and pets_api_prefix in request.url:
+            if request.response and pets_api_base in request.url:
                 try:
-                    pet_data_response = request.response.body.decode("utf-8")
-                    pet_data_json = json.loads(pet_data_response)
+                    pet_data_json = json.loads(request.response.body.decode("utf-8"))
                     new_pets = pet_data_json.get("data", [])
                     for pet in new_pets:
                         pet_id = pet.get("id")
@@ -120,16 +184,16 @@ def fetch_pets_data(driver, shop_id):
                             if user_shop:
                                 all_branch[user_shop["id"]] = user_shop
                     if len(all_pets) > new_pets_count:
-                        log_and_print(f"累積pets件数: {len(all_pets)} 件, 累積users件数: {len(all_users)} 件")
+                        log_and_print(f"累積pets件数: {len(all_pets)} 件")
                         new_pets_count = len(all_pets)
                     if not new_pets:
-                        log_and_print(f"データ取得完了: レスポンスが空です。")
                         return all_users, list(all_pets.values()), all_branch
+                    pet_data_response = True
                 except Exception as e:
                     log_and_print(f"ペットデータ取得エラー: {e}")
                     return all_users, list(all_pets.values()), all_branch
         if not pet_data_response:
-            log_and_print("API リクエストが見つかりません。終了します。")
+            log_and_print("APIリクエストが見つかりません。終了します。")
             break
     return all_users, list(all_pets.values()), all_branch
 

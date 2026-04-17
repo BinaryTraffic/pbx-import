@@ -126,51 +126,39 @@ def upload_to_pbx_site(csv_path):
             return
 
         # ✅ ユーザー名入力
-        log_and_print("👉 ユーザー名入力します（3秒後）")
+        log_and_print("👉 ユーザー名入力します")
         username_input.send_keys(PBX_LOGIN_USER)
-        time.sleep(3)
 
-        # ✅ パスワードフィールドも確認
-        try:
-            password_input = driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input")
-            if password_input is None:
-                log_and_print("❌ パスワード入力フィールドが取得できませんでした！")
-                driver.quit()
-                return
-            else:
-                log_and_print("✅ パスワード入力フィールド取得成功")
-        except Exception as e:
-            log_and_print(f"❌ パスワードフィールド取得エラー: {e}")
-            driver.quit()
-            return
-
-        # ✅ パスワード入力
-        log_and_print("👉 パスワード入力します（3秒後）")
+        password_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input"))
+        )
+        log_and_print("👉 パスワード入力します")
         password_input.send_keys(PBX_PASSWORD)
-        time.sleep(3)
 
         log_and_print("👉 ログインボタン押します")
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[4]/td/input").click()
-        time.sleep(3)
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[4]/td/input"))
+        ).click()
 
-        driver.find_element(By.XPATH, "/html/body/a[3]").click()
-        time.sleep(3)
-        driver.find_element(By.XPATH, "/html/body/a[4]").click()
-        time.sleep(3)
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/a[3]"))
+        ).click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/a[4]"))
+        ).click()
 
-        file_input = driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[1]/td/input")
-        if file_input is None:
-            log_and_print("❌ ファイルアップロードinputが取得できませんでした")
-            driver.quit()
-            return
-
+        file_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "/html/body/form/table/tbody/tr[1]/td/input"))
+        )
         file_input.send_keys(absolute_csv_path)
-        time.sleep(2)
 
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input").click()
-        time.sleep(1)
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[4]/td/input").click()
-        time.sleep(3)
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input"))
+        ).click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[4]/td/input"))
+        ).click()
+        time.sleep(2)
 
         log_and_print("✅ PBXサイトへのアップロード完了")
 
@@ -195,21 +183,30 @@ def scrape_and_download():
 
     try:
         driver.get("http://e-phone.jp/login/")
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[1]/td/input").send_keys(PBX_LOGIN_USER)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "/html/body/form/table/tbody/tr[1]/td/input"))
+        ).send_keys(PBX_LOGIN_USER)
         driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input").send_keys(PBX_PASSWORD)
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[4]/td/input").click()
-        time.sleep(2)
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[4]/td/input"))
+        ).click()
 
-        driver.find_element(By.XPATH, "/html/body/a[3]").click()
-        time.sleep(2)
-        driver.find_element(By.XPATH, "/html/body/a[5]").click()
-        time.sleep(2)
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/a[3]"))
+        ).click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/a[5]"))
+        ).click()
 
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[1]/td/input[2]").click()
-        time.sleep(1)
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[2]/td/input").click()
-        time.sleep(1)
-        driver.find_element(By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input").click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[1]/td/input[2]"))
+        ).click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[2]/td/input"))
+        ).click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input"))
+        ).click()
         time.sleep(3)
 
         log_and_print("✅ ダウンロード操作完了")

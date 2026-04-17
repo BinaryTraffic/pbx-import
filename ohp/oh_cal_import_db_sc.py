@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil import parser
 from seleniumwire import webdriver
 from selenium.webdriver.common.by import By
@@ -100,7 +101,8 @@ def login(driver):
     )
     login_button.click()
 
-    time.sleep(5)
+    # ログイン完了をURLで検知（固定sleep不要）
+    WebDriverWait(driver, 15).until(EC.url_contains('/shop/'))
     update_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # branch_index に基づいて支店切り替え（None の場合はデフォルト 0）
@@ -114,14 +116,33 @@ def login(driver):
     
     return update_dt
 
+def wait_for_xhr(driver, url_keyword, timeout=15):
+    """url_keywordを含むXHRレスポンスが来るまでポーリング待機"""
+    start = time.time()
+    while time.time() - start < timeout:
+        for request in reversed(driver.requests):
+            if request.response and url_keyword in request.url:
+                try:
+                    return json.loads(request.response.body.decode('utf-8'))
+                except Exception:
+                    pass
+        time.sleep(0.3)
+    return None
+
 def switch_account(driver, option_index):
     """アカウントを切り替える"""
     select_element = driver.find_element(By.XPATH, '/html/body/div[1]/div/div/header/div/div[1]/div/select')
     select = Select(select_element)
-    select.select_by_index(option_index)  # オプションのインデックスで選択
+    select.select_by_index(option_index)
 
     log_and_print(f"アカウントが切り替えられました: オプション {option_index}")
-    time.sleep(5)  # 遷移後の待機時間を設定
+    # ローディングが消えるまで待機（固定sleepより高速）
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.invisibility_of_element_located((By.ID, "loadingOverlay"))
+        )
+    except Exception:
+        time.sleep(2)
 
 def upsert_reservation_data(cursor, reservation, update_dt):
     
@@ -364,19 +385,23 @@ def scrape_calendar(driver, connection, update_dt, shop_id):
 
     if loop_count > 0:
         for i in range(loop_count, 0, -1):
-            #print(f"{i:02d} - 処理を実行中...")  # 進行状況の表示
+            prev_from, _ = extract_date_from_request_url(driver)
+            del driver.requests  # 古いリクエストをクリア
 
-            # クリック処理（カレンダー操作）
             WebDriverWait(driver, 20).until(
                 EC.element_to_be_clickable((By.XPATH, '//*[@id="__layout"]/div/main/main/div/div[2]/div/div[2]/div/div[1]/div[2]/div/button[1]'))
             ).click()
-            time.sleep(10)
 
-            # 操作後の年月を取得してログに出力
+            # 新しいXHRが届くまでポーリング（sleep(10)を廃止）
+            start = time.time()
+            while time.time() - start < 20:
+                new_from, new_to = extract_date_from_request_url(driver)
+                if new_from and new_from != prev_from:
+                    break
+                time.sleep(0.5)
+
             current_month = get_current_calendar_month(driver)
             log_and_print(f"操作後の表示年月: {current_month}")
-
-            # 操作後の日付範囲を取得
             from_date, to_date = extract_date_from_request_url(driver)
             if from_date and to_date:
                 log_and_print(f"操作後の日付範囲: from={from_date}, to={to_date}")
@@ -393,20 +418,33 @@ def scrape_calendar(driver, connection, update_dt, shop_id):
         )
     )
 
-    log_and_print(f"取得したイベント数: {len(events)}")
+    # hrefからreservation_idを一括収集（クリック不要）
+    event_hrefs = []
+    for event in events:
+        href = event.get_attribute('href') or ''
+        rid = extract_reservation_id(href)
+        if rid:
+            event_hrefs.append((rid, href))
 
-    # 各イベントの詳細を取得しUPSERT
-    for idx, event in enumerate(events):
-        driver.execute_script("arguments[0].click();", event)
-        time.sleep(2)
+    log_and_print(f"取得したイベント数: {len(event_hrefs)}")
 
-        reservation_id = extract_reservation_id(driver.current_url)
-        if reservation_id:
-            reservation_data = fetch_xhr_response(driver, reservation_id)
+    # 各詳細ページへ直接ナビゲート → XHRをポーリング待機（sleep(2)を廃止）
+    for idx, (rid, href) in enumerate(event_hrefs):
+        del driver.requests
+        driver.get(href)
+
+        start = time.time()
+        reservation_data = None
+        while time.time() - start < 10:
+            reservation_data = fetch_xhr_response(driver, rid)
             if reservation_data:
-                save_reservation_data_to_mysql(connection, reservation_data, update_dt)
+                break
+            time.sleep(0.3)
 
-        log_and_print(f"{idx + 1}/{len(events)} イベント処理完了")
+        if reservation_data:
+            save_reservation_data_to_mysql(connection, reservation_data, update_dt)
+
+        log_and_print(f"{idx + 1}/{len(event_hrefs)} イベント処理完了")
 
     log_and_print("カレンダーのスクレイピングが完了しました。")
 
