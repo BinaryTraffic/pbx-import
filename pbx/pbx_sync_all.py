@@ -1,5 +1,10 @@
 import os
 import sys
+import io
+if sys.stdout and hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 import time
 import pandas as pd
 import shutil
@@ -10,6 +15,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # common モジュールのパス解決
@@ -33,8 +40,8 @@ if getattr(sys, 'frozen', False):
 else:
     EXEC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 
-WORK_DIR = os.path.join(EXEC_DIR, "work")
-ARCHIVE_DIR = os.path.join(WORK_DIR, "archive")
+WORK_DIR = os.path.normpath(os.path.join(EXEC_DIR, "work"))
+ARCHIVE_DIR = os.path.normpath(os.path.join(WORK_DIR, "archive"))
 EXPORT_DIR = WORK_DIR  # 出力もダウンロードもwork内で完結
 
 # ✅ work/とarchive/を初回起動時に自動作成
@@ -110,9 +117,10 @@ def upload_to_pbx_site(csv_path):
     log_and_print(f"✅ アップロードファイルパス確認: {absolute_csv_path}")
 
     options = Options()
-    options.add_argument("--headless")  # ヘッドレス禁止（コメントアウト）
+    options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
@@ -180,9 +188,10 @@ def upload_to_pbx_site(csv_path):
 
 def scrape_and_download():
     options = Options()
-    options.add_argument("--headless")
+    options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
 
     prefs = {
@@ -220,7 +229,18 @@ def scrape_and_download():
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "/html/body/form/table/tbody/tr[3]/td/input"))
         ).click()
-        time.sleep(3)
+
+        # ダウンロード完了を待機（最大60秒）
+        import glob as _glob
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            crdownload = _glob.glob(os.path.join(WORK_DIR, "*.crdownload"))
+            finished = _glob.glob(os.path.join(WORK_DIR, "addressbook*.csv"))
+            if finished and not crdownload:
+                break
+            time.sleep(1)
+        else:
+            log_and_print("⚠️ ダウンロードがタイムアウトしました（60秒）")
 
         log_and_print("✅ ダウンロード操作完了")
     finally:

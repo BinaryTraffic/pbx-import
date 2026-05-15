@@ -20,7 +20,8 @@ class MySQLSSHConnector:
             password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_NAME"),
             charset="utf8mb4",
-            cursorclass=pymysql.cursors.DictCursor
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=30,
         )
 
     def close(self):
