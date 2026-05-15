@@ -4,9 +4,15 @@ import time
 import json
 import logging
 import sys
+import io
+if sys.stdout and hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil import parser
+from tqdm import tqdm
 from seleniumwire import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -114,8 +120,10 @@ def login(driver):
     )
     login_button.click()
 
-    # ログイン完了をURLで検知（固定sleep不要）
-    WebDriverWait(driver, 15).until(EC.url_contains('/shop/'))
+    # ログイン完了をURLで検知（/shop/login から離れるまで待機）
+    WebDriverWait(driver, 15).until(
+        lambda d: '/shop/login' not in d.current_url
+    )
     update_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # branch_index に基づいて支店切り替え（None の場合はデフォルト 0）
@@ -397,7 +405,7 @@ def scrape_calendar(driver, connection, update_dt, shop_id):
         #connection.commit()
 
     if loop_count > 0:
-        for i in range(loop_count, 0, -1):
+        for i in tqdm(range(loop_count, 0, -1), desc="月を遡り中", unit="月", file=sys.stderr):
             prev_from, _ = extract_date_from_request_url(driver)
             del driver.requests  # 古いリクエストをクリア
 
@@ -442,7 +450,7 @@ def scrape_calendar(driver, connection, update_dt, shop_id):
     log_and_print(f"取得したイベント数: {len(event_hrefs)}")
 
     # 各詳細ページへ直接ナビゲート → XHRをポーリング待機（sleep(2)を廃止）
-    for idx, (rid, href) in enumerate(event_hrefs):
+    for idx, (rid, href) in enumerate(tqdm(event_hrefs, desc="イベント取得", unit="件", file=sys.stderr)):
         del driver.requests
         driver.get(href)
 
@@ -456,8 +464,6 @@ def scrape_calendar(driver, connection, update_dt, shop_id):
 
         if reservation_data:
             save_reservation_data_to_mysql(connection, reservation_data, update_dt)
-
-        log_and_print(f"{idx + 1}/{len(event_hrefs)} イベント処理完了")
 
     log_and_print("カレンダーのスクレイピングが完了しました。")
 
@@ -474,9 +480,11 @@ def main():
         try:
             options = {"disable_encoding": True}
             chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--headless=new')
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--log-level=3")
             chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
 

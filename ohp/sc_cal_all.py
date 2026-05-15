@@ -4,10 +4,13 @@ import time
 from datetime import datetime
 import os
 import sys
+import io
+if sys.stdout and hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 from tqdm import tqdm
-CREATE_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
 
-branch_indices = [0, 1, 2]
 _BASE = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 log_dir = os.path.join(_BASE, '..', 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -17,32 +20,47 @@ _exe_name = os.path.basename(sys.executable) if getattr(sys, 'frozen', False) el
 _is_beta = '_beta' in _exe_name
 
 def _to_exe(name):
-    """beta実行時は子EXEも自動でbeta版に切り替える"""
     return name.replace('.exe', '_beta.exe') if _is_beta else name
 
-def run_silently_to_log(script_name, args_per_branch):
-    for branch in tqdm(branch_indices, desc=f"{script_name} 実行中", unit="支店"):
+# branch=N を argv から取得（なければ全支店）
+_branch_arg = None
+for _a in sys.argv[1:]:
+    if _a.startswith('branch='):
+        try:
+            _branch_arg = int(_a.split('=')[1])
+        except ValueError:
+            pass
+
+branch_indices = [_branch_arg] if _branch_arg is not None else [0, 1, 2]
+
+# 1支店あたりに実行するスクリプトステップ
+SCRIPT_STEPS = [
+    (_to_exe("oh_cal_import_db_sc.exe"), ["month=0"], "カレンダー読み取り"),
+    (_to_exe("oh_u_p_import.exe"),        [],          "ユーザー/ペット取込"),
+]
+
+def run_branch(branch):
+    bar = tqdm(total=len(SCRIPT_STEPS), desc=f"支店{branch}", unit="ステップ", file=sys.stderr)
+    for script_name, args, label in SCRIPT_STEPS:
+        bar.set_description(label)
+        bar.refresh()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_name = script_name.replace('.exe', '').replace(' ', '_')
-        log_filename = f"{base_name}_branch{branch}_{timestamp}.log"
-        log_path = os.path.join(log_dir, log_filename)
-
+        log_path = os.path.join(log_dir, f"{base_name}_branch{branch}_{timestamp}.log")
         with open(log_path, "w", encoding="utf-8-sig") as logf:
             process = subprocess.Popen(
-                [script_name] + args_per_branch + [f"branch={branch}"],
+                [script_name] + args + [f"branch={branch}"],
                 stdout=logf,
                 stderr=logf,
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 shell=False
             )
             process.wait()
+        bar.update(1)
         time.sleep(1)
+    bar.close()
 
-# === ステップ①: oh_cal_import_db_sc.exe を支店ごとに順次実行 ===
-run_silently_to_log(_to_exe("oh_cal_import_db_sc.exe"), ["month=0"])
+for branch in branch_indices:
+    run_branch(branch)
 
-# === ステップ②: oh_u_p_import.exe を支店ごとに順次実行 ===
-run_silently_to_log(_to_exe("oh_u_p_import.exe"), [])
-
-# === ステップ③: 完了メッセージ ===
 print("✅ すべての支店・スクリプトの処理が完了しました。")

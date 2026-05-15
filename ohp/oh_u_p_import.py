@@ -3,6 +3,11 @@ import os
 import logging
 import time
 import sys
+import io
+if sys.stdout and hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 import requests as req_lib
 from datetime import datetime
 from seleniumwire import webdriver
@@ -97,7 +102,9 @@ def login(driver, branch):
         inputs[0].send_keys(email)
         inputs[1].send_keys(password)
         driver.find_element(By.CLASS_NAME, "c-btn-add-a").click()
-        WebDriverWait(driver, 15).until(EC.url_contains('/shop/'))
+        WebDriverWait(driver, 15).until(
+            lambda d: '/shop/login' not in d.current_url
+        )
         switch_account(driver, branch_to_select_index[branch_str])
         update_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_and_print("ログイン処理が完了しました。")
@@ -343,10 +350,11 @@ def main():
         connection = db_connector.connection
 
         chrome_options = Options()
-        chrome_options.add_argument("--window-size=1920x1080")
+        chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-features=UseChromeOSDirectML")
         chrome_options.add_argument("--log-level=3")
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
