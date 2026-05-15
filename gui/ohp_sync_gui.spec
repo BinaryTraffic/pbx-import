@@ -7,9 +7,9 @@ a = Analysis(
     datas=[('../.env', '.')],
     hiddenimports=[],
     hookspath=[],
-    hooksconfig={},
+    hooksconfig={"matplotlib": {"backends": ["Qt5Agg"], "qt_bindings": "PySide6"}},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['PyQt5', 'PyQt6'],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
