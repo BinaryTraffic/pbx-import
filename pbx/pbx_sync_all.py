@@ -92,6 +92,18 @@ def export_new_pbx_memberlist():
     try:
         cursor.execute("CALL get_new_pbx_memberlist();")
         results = cursor.fetchall()
+        logging.debug(f"[export] 結果セット#1: {len(results)}件")
+
+        # PyMySQLマルチ結果セット対応: 全結果セットを走査し、最後の非空セットを使用
+        set_index = 2
+        while cursor.nextset():
+            next_results = cursor.fetchall()
+            logging.debug(f"[export] 結果セット#{set_index}: {len(next_results)}件")
+            if next_results:
+                results = next_results
+            set_index += 1
+
+        logging.debug(f"[export] 最終採用件数: {len(results)}件")
 
         if not results:
             log_and_print("🔸 新しいレコードがありません。処理を終了します。")
