@@ -3,10 +3,10 @@
 
 a = Analysis(
     ['pbx_sync_all.py'],
-    pathex=['..'],
+    pathex=['.'],
     binaries=[],
     datas=[('../.env', '.')],
-    hiddenimports=[],
+    hiddenimports=['common.ssh_mysql_connector'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
