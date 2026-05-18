@@ -280,37 +280,38 @@ def upsert_addressbook(csv_path):
         df = pd.read_csv(csv_path, encoding="utf-8", dtype={"電話番号": str})
         df.columns = [col.lower() for col in df.columns]
 
+        # PBXが正義: 電話番号で重複排除してから全件入れ替え
+        df = df.dropna(subset=["電話番号"])
+        df = df.drop_duplicates(subset=["電話番号"])
+
+        cursor.execute("DELETE FROM pbx_addressbook")
+        log_and_print(f"✅ pbx_addressbook 全件削除")
+
         sql = """
         INSERT INTO pbx_addressbook (
-            id, 名前, カナ, 電話番号, 短縮番号, グループ, 着信拒否, メモ
+            名前, カナ, 電話番号, 短縮番号, グループ, 着信拒否, メモ
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            名前=VALUES(名前),
-            カナ=VALUES(カナ),
-            電話番号=VALUES(電話番号),
-            短縮番号=VALUES(短縮番号),
-            グループ=VALUES(グループ),
-            着信拒否=VALUES(着信拒否),
-            メモ=VALUES(メモ)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
 
+        def v(val):
+            return None if pd.isna(val) else val
+
         success_count = 0
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             cursor.execute(sql, (
-                row.get("id") if pd.notna(row.get("id")) else None,
-                row.get("名前") if pd.notna(row.get("名前")) else None,
-                row.get("カナ") if pd.notna(row.get("カナ")) else None,
-                row.get("電話番号") if pd.notna(row.get("電話番号")) else None,
-                row.get("短縮番号") if pd.notna(row.get("短縮番号")) else None,
-                row.get("グループ") if pd.notna(row.get("グループ")) else None,
-                row.get("着信拒否") if pd.notna(row.get("着信拒否")) else None,
-                row.get("メモ") if pd.notna(row.get("メモ")) else None
+                v(row.get("名前")),
+                v(row.get("カナ")),
+                row.get("電話番号"),
+                v(row.get("短縮番号")),
+                v(row.get("グループ")),
+                v(row.get("着信拒否")),
+                v(row.get("メモ"))
             ))
             success_count += 1
 
         conn.commit()
-        log_and_print(f"✅ pbx_addressbookにUPSERT完了: {success_count}件")
+        log_and_print(f"✅ pbx_addressbook 再構築完了: {success_count}件")
 
     finally:
         cursor.close()
